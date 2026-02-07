@@ -3,12 +3,18 @@
 
 import io
 import zipfile
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, send_from_directory
 
 from bc3_reader import BC3Parser, export_to_xlsx_bytes, export_to_pdf_bytes
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='public', static_url_path='')
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB límite
+
+
+@app.route('/')
+def index():
+    """Sirve la página principal."""
+    return send_from_directory(app.static_folder, 'index.html')
 
 
 @app.route('/api/convert', methods=['POST'])
