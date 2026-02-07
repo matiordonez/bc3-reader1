@@ -3,14 +3,13 @@
 
 import io
 import os
-import zipfile
 from flask import Flask, request, send_file, jsonify, Response
 
 from bc3_reader import BC3Parser, export_to_xlsx_bytes, export_to_pdf_bytes
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB límite
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20 MB límite
 
 # HTML de la página principal - Diseño oficial Plancraft (plancraft.com/de-de)
 # Paleta: fondo #000, superficie #111, acento #00D4AA, tipografía Inter
@@ -62,13 +61,20 @@ INDEX_HTML = '''<!DOCTYPE html>
       height: 36px;
       width: auto;
     }
-    .header-brand { font-size: 1.125rem; font-weight: 600; color: var(--plancraft-text); }
-    .header-divider { color: var(--plancraft-border); font-weight: 300; }
-    .header-product { color: var(--plancraft-accent); font-weight: 600; }
+    .header-product { font-size: 1.125rem; font-weight: 600; color: var(--plancraft-accent); margin-left: 8px; }
     .container {
-      max-width: 440px;
+      max-width: 520px;
       width: 100%;
     }
+    .cards { display: flex; flex-direction: column; gap: 24px; }
+    .card {
+      background: var(--plancraft-surface);
+      border: 1px solid var(--plancraft-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      transition: all 0.2s ease;
+    }
+    .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 16px; color: var(--plancraft-text); }
     h1 {
       font-size: 1.75rem;
       font-weight: 700;
@@ -158,90 +164,111 @@ INDEX_HTML = '''<!DOCTYPE html>
 <body>
   <div class="header">
     <img src="https://cdn.prod.website-files.com/6721edec2a463887e742a101/6721edec2a463887e742a172_plancraft%20logo.svg" alt="plancraft" onerror="this.src='/plancraft-logo.png'">
-    <span class="header-brand">plancraft</span>
-    <span class="header-divider">|</span>
     <span class="header-product">BC3 Reader</span>
   </div>
   <div class="container">
     <h1>Convertidor <span class="accent">BC3</span></h1>
-    <p class="subtitle">Sube tu archivo BC3 (FIEBDC) y descarga Excel y PDF</p>
-    <form id="uploadForm">
-      <div class="upload-zone" id="dropZone">
-        <input type="file" id="fileInput" name="file" accept=".bc3" required>
-        <div class="upload-icon">📄</div>
-        <div class="upload-text">Arrastra tu archivo aquí o haz clic para seleccionar</div>
-        <div class="upload-hint">Solo archivos .bc3 (máx. 5 MB)</div>
+    <p class="subtitle">Sube tu archivo BC3 (FIEBDC) y elige el formato de salida</p>
+    <div class="cards">
+      <div class="card">
+        <h3 class="card-title">BC3 → PDF</h3>
+        <form id="formPdf" class="card-form">
+          <input type="hidden" name="format" value="pdf">
+          <div class="upload-zone" id="dropZonePdf" data-format="pdf">
+            <input type="file" name="file" accept=".bc3" required>
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">Arrastra tu BC3 o haz clic</div>
+            <div class="upload-hint">Archivos .bc3 (máx. 20 MB)</div>
+          </div>
+          <div class="file-name" id="fileNamePdf"></div>
+          <button type="submit" class="btn" disabled>
+            <span class="btn-text">Convertir a PDF</span>
+          </button>
+        </form>
       </div>
-      <div class="file-name" id="fileName"></div>
-      <button type="submit" class="btn" id="submitBtn" disabled>
-        <span class="btn-text">Convertir y descargar</span>
-      </button>
-    </form>
+      <div class="card">
+        <h3 class="card-title">BC3 → Excel</h3>
+        <form id="formXlsx" class="card-form">
+          <input type="hidden" name="format" value="xlsx">
+          <div class="upload-zone" id="dropZoneXlsx" data-format="xlsx">
+            <input type="file" name="file" accept=".bc3" required>
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">Arrastra tu BC3 o haz clic</div>
+            <div class="upload-hint">Archivos .bc3 (máx. 20 MB)</div>
+          </div>
+          <div class="file-name" id="fileNameXlsx"></div>
+          <button type="submit" class="btn" disabled>
+            <span class="btn-text">Convertir a Excel</span>
+          </button>
+        </form>
+      </div>
+    </div>
     <div class="message" id="message"></div>
   </div>
   <p class="footer">Formato FIEBDC • <a href="https://plancraft.com" target="_blank" rel="noopener">plancraft.com</a></p>
   <script>
-    const dropZone=document.getElementById('dropZone'), fileInput=document.getElementById('fileInput'),
-      fileName=document.getElementById('fileName'), submitBtn=document.getElementById('submitBtn'),
-      btnText=submitBtn.querySelector('.btn-text'), form=document.getElementById('uploadForm'),
-      message=document.getElementById('message');
+    const message=document.getElementById('message');
     function showMessage(text,type){ message.textContent=text; message.className='message visible '+type; }
     function hideMessage(){ message.className='message'; }
-    function setLoading(loading){
-      submitBtn.disabled=loading;
-      submitBtn.classList.toggle('loading',loading);
-      if(loading){
-        btnText.innerHTML='<span class="spinner"></span> Procesando...';
-      }else{
-        btnText.textContent='Convertir y descargar';
+    function initCard(formId,dropId,fileNameId){
+      const form=document.getElementById(formId), dropZone=document.getElementById(dropId),
+        fileNameEl=document.getElementById(fileNameId), fileInput=dropZone.querySelector('input[type="file"]'),
+        btn=form.querySelector('button'), btnText=btn.querySelector('.btn-text'), format=form.querySelector('input[name="format"]').value;
+      function setLoading(loading){
+        btn.disabled=loading;
+        btn.classList.toggle('loading',loading);
+        btnText.innerHTML=loading?'<span class="spinner"></span> Procesando...':(format==='pdf'?'Convertir a PDF':'Convertir a Excel');
       }
-    }
-    function updateFile(files){
-      if(files&&files.length){
-        fileInput.files=files;
-        fileName.textContent='✓ '+files[0].name;
-        fileName.classList.add('visible');
-        submitBtn.disabled=false;
-      }
-    }
-    dropZone.onclick=()=>fileInput.click();
-    dropZone.ondragover=e=>{ e.preventDefault(); dropZone.classList.add('dragover'); };
-    dropZone.ondragleave=()=>dropZone.classList.remove('dragover');
-    dropZone.ondrop=e=>{
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      if(e.dataTransfer.files.length&&e.dataTransfer.files[0].name.toLowerCase().endsWith('.bc3')){
-        updateFile(e.dataTransfer.files);
-      }else{
-        showMessage('Solo se aceptan archivos .bc3','error');
-      }
-    };
-    fileInput.onchange=e=>updateFile(e.target.files);
-    form.onsubmit=async e=>{
-      e.preventDefault();
-      if(!fileInput.files.length) return;
-      setLoading(true);
-      hideMessage();
-      try{
-        const res=await fetch('/api/convert',{method:'POST',body:new FormData(form)});
-        if(!res.ok){
-          const err=await res.json().catch(()=>({}));
-          throw new Error(err.error||'Error '+res.status);
+      function updateFile(files){
+        if(files&&files.length){
+          fileInput.files=files;
+          fileNameEl.textContent='✓ '+files[0].name;
+          fileNameEl.classList.add('visible');
+          btn.disabled=false;
         }
-        const blob=await res.blob();
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;
-        a.download=fileInput.files[0].name.replace(/\\.bc3$/i,'')+'_bc3_export.zip';
-        a.click();
-        URL.revokeObjectURL(url);
-        showMessage('¡Listo! El ZIP con Excel y PDF se ha descargado.','success');
-      }catch(err){
-        showMessage(err.message||'Error al procesar el archivo','error');
-      }finally{
-        setLoading(false);
       }
-    };
+      dropZone.onclick=()=>fileInput.click();
+      dropZone.ondragover=e=>{ e.preventDefault(); dropZone.classList.add('dragover'); };
+      dropZone.ondragleave=()=>dropZone.classList.remove('dragover');
+      dropZone.ondrop=e=>{
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if(e.dataTransfer.files.length&&e.dataTransfer.files[0].name.toLowerCase().endsWith('.bc3')){
+          updateFile(e.dataTransfer.files);
+        }else{
+          showMessage('Solo se aceptan archivos .bc3','error');
+        }
+      };
+      fileInput.onchange=e=>updateFile(e.target.files);
+      form.onsubmit=async e=>{
+        e.preventDefault();
+        if(!fileInput.files.length) return;
+        setLoading(true);
+        hideMessage();
+        try{
+          const res=await fetch('/api/convert',{method:'POST',body:new FormData(form)});
+          if(!res.ok){
+            const err=await res.json().catch(()=>({}));
+            throw new Error(err.error||'Error '+res.status);
+          }
+          const blob=await res.blob();
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement('a');
+          const ext=format==='pdf'?'pdf':'xlsx';
+          a.href=url;
+          a.download=fileInput.files[0].name.replace(/\\.bc3$/i,'')+'.'+ext;
+          a.click();
+          URL.revokeObjectURL(url);
+          showMessage('¡Listo! Archivo '+ext.toUpperCase()+' descargado.','success');
+        }catch(err){
+          showMessage(err.message||'Error al procesar el archivo','error');
+        }finally{
+          setLoading(false);
+        }
+      };
+    }
+    initCard('formPdf','dropZonePdf','fileNamePdf');
+    initCard('formXlsx','dropZoneXlsx','fileNameXlsx');
   </script>
 </body>
 </html>
@@ -264,10 +291,14 @@ def logo():
 @app.route('/api/convert', methods=['POST'])
 def convert():
     """
-    Recibe un archivo BC3 y retorna un ZIP con Excel y PDF.
+    Recibe un archivo BC3 y format (pdf|xlsx). Retorna el archivo convertido.
     """
     if 'file' not in request.files:
         return jsonify({'error': 'No se envió ningún archivo'}), 400
+    
+    format_type = request.form.get('format', 'xlsx').lower()
+    if format_type not in ('pdf', 'xlsx'):
+        return jsonify({'error': 'Formato inválido. Usa pdf o xlsx'}), 400
     
     file = request.files['file']
     
@@ -280,13 +311,13 @@ def convert():
     try:
         content = file.read()
         
-        # Parsear BC3
+        # Parsear BC3 (FIEBDC)
         parser = BC3Parser()
         presupuesto = parser.parse_from_bytes(content, file.filename)
         partidas = parser.get_partidas_con_detalles(presupuesto)
         
         if not partidas:
-            return jsonify({'error': 'El archivo BC3 no contiene partidas válidas'}), 400
+            return jsonify({'error': 'El archivo BC3 no contiene partidas válidas. Verifica que sea un archivo FIEBDC correcto.'}), 400
         
         titulo = "Presupuesto BC3"
         if presupuesto.version.get('empresa'):
@@ -294,24 +325,22 @@ def convert():
         
         base_name = file.filename.rsplit('.', 1)[0]
         
-        # Generar Excel y PDF en memoria
-        xlsx_bytes = export_to_xlsx_bytes(partidas, titulo)
-        pdf_bytes = export_to_pdf_bytes(partidas, titulo)
-        
-        # Crear ZIP
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f"{base_name}.xlsx", xlsx_bytes)
-            zf.writestr(f"{base_name}.pdf", pdf_bytes)
-        
-        zip_buffer.seek(0)
-        
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f"{base_name}_bc3_export.zip"
-        )
+        if format_type == 'pdf':
+            pdf_bytes = export_to_pdf_bytes(partidas, titulo)
+            return send_file(
+                io.BytesIO(pdf_bytes),
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=f"{base_name}.pdf"
+            )
+        else:
+            xlsx_bytes = export_to_xlsx_bytes(partidas, titulo)
+            return send_file(
+                io.BytesIO(xlsx_bytes),
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=f"{base_name}.xlsx"
+            )
     
     except Exception as e:
         return jsonify({'error': f'Error al procesar: {str(e)}'}), 500
