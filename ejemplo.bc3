@@ -1,0 +1,11 @@
+~V|EJEMPLO S.L.|FIEBDC-3/2020|BC3 Reader||ANSI|
+~K|\2\3\3\2\2\2\2\EUR\|0|
+~C|01#|m|CAPÍTULO 01. TRABAJOS PRELIMINARES|0,00||0|||
+~C|01.1|m|Demoliciones y derribos|0,00||0|||
+~C|01.1.001|m2|Demolición de solados|12,50|250124|0|||
+~C|01.1.002|m|Demolición de muros de fábrica|45,00|250124|0|||
+~T|01.1.001|Demolición de solados cerámicos o de baldosa hasta 2 cm de espesor incluido retirada de escombros.|
+~T|01.1.002|Demolición de muros de fábrica de ladrillo o bloque de hormigón hasta 30 cm de espesor.|
+~M|01.1.001|150|
+~M|01.1.002|25|
+~D|01.1.001|\01.1.001\1,00\|
