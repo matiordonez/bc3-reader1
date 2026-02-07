@@ -2,38 +2,47 @@
 """BC3 Reader - Aplicación web Flask para Vercel."""
 
 import io
+import os
 import zipfile
 from flask import Flask, request, send_file, jsonify, Response
 
 from bc3_reader import BC3Parser, export_to_xlsx_bytes, export_to_pdf_bytes
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB límite
 
 # HTML de la página principal (embebido para que funcione en Vercel sin depender de public/)
+# Colores Plancraft: fondo oscuro, texto blanco, acento verde/teal vibrante
 INDEX_HTML = '''<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BC3 Reader - Convertidor de presupuestos</title>
+  <title>BC3 Reader - Plancraft</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --bg: #0f0f12; --surface: #1a1a1f; --border: #2a2a32; --text: #f0f0f5; --text-muted: #8888a0; --accent: #6366f1; --accent-hover: #818cf8; --success: #22c55e; --error: #ef4444; }
+    :root { --bg: #0a0a0d; --surface: #141419; --border: #2a2a35; --text: #ffffff; --text-muted: #9ca3af; --accent: #14b8a6; --accent-hover: #2dd4bf; --success: #22c55e; --error: #ef4444; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'DM Sans', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; }
+    .header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 2rem; }
+    .header img { height: 40px; width: auto; }
+    .header span { font-size: 1.25rem; font-weight: 600; color: var(--text-muted); }
+    .header .divider { color: var(--text-muted); font-weight: 300; }
+    .header .product { color: var(--accent); font-weight: 600; }
     .container { max-width: 480px; width: 100%; }
-    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text); }
+    h1 .accent { color: var(--accent); }
     .subtitle { color: var(--text-muted); font-size: 1rem; margin-bottom: 2rem; }
     .upload-zone { background: var(--surface); border: 2px dashed var(--border); border-radius: 16px; padding: 3rem 2rem; text-align: center; transition: all 0.2s ease; cursor: pointer; position: relative; }
-    .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: rgba(99, 102, 241, 0.05); }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: rgba(20, 184, 166, 0.08); }
     .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
     .upload-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.6; }
     .upload-text { font-size: 1.1rem; margin-bottom: 0.5rem; }
     .upload-hint { font-size: 0.875rem; color: var(--text-muted); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 1rem 2rem; font-size: 1rem; font-weight: 600; font-family: inherit; border: none; border-radius: 12px; cursor: pointer; margin-top: 1.5rem; background: var(--accent); color: white; width: 100%; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 1rem 2rem; font-size: 1rem; font-weight: 600; font-family: inherit; border: none; border-radius: 12px; cursor: pointer; margin-top: 1.5rem; background: var(--accent); color: #0a0a0d; width: 100%; }
     .btn:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
     .file-name { margin-top: 1rem; font-size: 0.9rem; color: var(--success); display: none; }
@@ -41,13 +50,19 @@ INDEX_HTML = '''<!DOCTYPE html>
     .message { margin-top: 1rem; padding: 1rem; border-radius: 8px; font-size: 0.9rem; display: none; }
     .message.visible { display: block; }
     .message.error { background: rgba(239, 68, 68, 0.15); color: #f87171; }
-    .message.success { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+    .message.success { background: rgba(20, 184, 166, 0.15); color: var(--accent-hover); }
     .footer { margin-top: 3rem; font-size: 0.8rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
+  <div class="header">
+    <img src="/plancraft-logo.png" alt="Plancraft">
+    <span>plancraft</span>
+    <span class="divider">|</span>
+    <span class="product">BC3 Reader</span>
+  </div>
   <div class="container">
-    <h1>BC3 Reader</h1>
+    <h1>Convertidor <span class="accent">BC3</span></h1>
     <p class="subtitle">Sube tu archivo BC3 (FIEBDC) y descarga Excel y PDF</p>
     <form id="uploadForm">
       <div class="upload-zone" id="dropZone">
@@ -61,7 +76,7 @@ INDEX_HTML = '''<!DOCTYPE html>
     </form>
     <div class="message" id="message"></div>
   </div>
-  <p class="footer">Formato FIEBDC • Presupuestos de construcción</p>
+  <p class="footer">Formato FIEBDC • Presupuestos de construcción • por Plancraft</p>
   <script>
     const dropZone=document.getElementById('dropZone'), fileInput=document.getElementById('fileInput'), fileName=document.getElementById('fileName'), submitBtn=document.getElementById('submitBtn'), form=document.getElementById('uploadForm'), message=document.getElementById('message');
     function showMessage(text,type){ message.textContent=text; message.className='message visible '+type; }
@@ -83,6 +98,13 @@ INDEX_HTML = '''<!DOCTYPE html>
 def index():
     """Sirve la página principal (embebida para Vercel)."""
     return Response(INDEX_HTML, mimetype='text/html; charset=utf-8')
+
+
+@app.route('/plancraft-logo.png')
+def logo():
+    """Sirve el logo de Plancraft."""
+    logo_path = os.path.join(BASE_DIR, 'assets', 'plancraft-logo.png')
+    return send_file(logo_path, mimetype='image/png')
 
 
 @app.route('/api/convert', methods=['POST'])
