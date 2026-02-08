@@ -63,16 +63,20 @@ INDEX_HTML = '''<!DOCTYPE html>
     }
     .header-product { font-size: 1.125rem; font-weight: 600; color: var(--plancraft-accent); margin-left: 8px; }
     .container {
-      max-width: 520px;
+      max-width: 680px;
       width: 100%;
     }
-    .cards { display: flex; flex-direction: column; gap: 24px; }
+    .cards { display: flex; flex-direction: row; gap: 24px; flex-wrap: wrap; justify-content: center; }
+    @media (max-width: 640px) { .cards { flex-direction: column; } }
     .card {
       background: var(--plancraft-surface);
       border: 1px solid var(--plancraft-border);
       border-radius: var(--radius-lg);
       padding: 24px;
       transition: all 0.2s ease;
+      flex: 1;
+      min-width: 280px;
+      max-width: 320px;
     }
     .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 16px; color: var(--plancraft-text); }
     h1 {
@@ -159,6 +163,16 @@ INDEX_HTML = '''<!DOCTYPE html>
     }
     .footer a { color: var(--plancraft-accent); text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
+    .loader-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999;
+      display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px;
+    }
+    .loader-overlay.visible { display: flex; }
+    .loader-bar-wrap { width: 280px; height: 6px; background: var(--plancraft-border); border-radius: 3px; overflow: hidden; }
+    .loader-bar { height: 100%; background: var(--plancraft-accent); width: 0%; transition: width 0.3s ease; border-radius: 3px; }
+    .loader-bar.indeterminate { width: 40%; animation: loadBar 1.5s ease-in-out infinite; }
+    @keyframes loadBar { 0% { transform: translateX(-100%); } 50% { transform: translateX(150%); } 100% { transform: translateX(-100%); } }
+    .loader-text { color: var(--plancraft-muted); font-size: 0.875rem; }
   </style>
 </head>
 <body>
@@ -206,10 +220,17 @@ INDEX_HTML = '''<!DOCTYPE html>
     <div class="message" id="message"></div>
   </div>
   <p class="footer">Formato FIEBDC • <a href="https://plancraft.com" target="_blank" rel="noopener">plancraft.com</a></p>
+  <div class="loader-overlay" id="loaderOverlay">
+    <div class="loader-bar-wrap"><div class="loader-bar" id="loaderBar"></div></div>
+    <span class="loader-text" id="loaderText">Procesando archivo BC3...</span>
+  </div>
   <script>
-    const message=document.getElementById('message');
+    const message=document.getElementById('message'), overlay=document.getElementById('loaderOverlay'),
+      loaderBar=document.getElementById('loaderBar'), loaderText=document.getElementById('loaderText');
     function showMessage(text,type){ message.textContent=text; message.className='message visible '+type; }
     function hideMessage(){ message.className='message'; }
+    function showLoader(format){ overlay.classList.add('visible'); loaderBar.classList.add('indeterminate'); loaderBar.style.width=''; loaderText.textContent='Convirtiendo a '+(format==='pdf'?'PDF':'Excel')+'...'; }
+    function hideLoader(){ loaderBar.classList.remove('indeterminate'); loaderBar.style.width='100%'; loaderText.textContent='¡Listo!'; setTimeout(()=>{ overlay.classList.remove('visible'); loaderBar.style.width='0%'; },400); }
     function initCard(formId,dropId,fileNameId){
       const form=document.getElementById(formId), dropZone=document.getElementById(dropId),
         fileNameEl=document.getElementById(fileNameId), fileInput=dropZone.querySelector('input[type="file"]'),
@@ -245,6 +266,7 @@ INDEX_HTML = '''<!DOCTYPE html>
         if(!fileInput.files.length) return;
         setLoading(true);
         hideMessage();
+        showLoader(format);
         try{
           const res=await fetch('/api/convert',{method:'POST',body:new FormData(form)});
           if(!res.ok){
@@ -259,8 +281,10 @@ INDEX_HTML = '''<!DOCTYPE html>
           a.download=fileInput.files[0].name.replace(/\\.bc3$/i,'')+'.'+ext;
           a.click();
           URL.revokeObjectURL(url);
+          hideLoader();
           showMessage('¡Listo! Archivo '+ext.toUpperCase()+' descargado.','success');
         }catch(err){
+          hideLoader();
           showMessage(err.message||'Error al procesar el archivo','error');
         }finally{
           setLoading(false);
