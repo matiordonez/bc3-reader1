@@ -344,8 +344,8 @@ def convert():
             return jsonify({'error': 'El archivo BC3 no contiene partidas válidas. Verifica que sea un archivo FIEBDC correcto.'}), 400
         
         titulo = "Presupuesto BC3"
-        if presupuesto.version.get('empresa'):
-            titulo = f"{titulo} - {presupuesto.version['empresa']}"
+        if presupuesto.version.get('propiedad'):
+            titulo = f"{titulo} - {presupuesto.version['propiedad']}"
         
         base_name = file.filename.rsplit('.', 1)[0]
         
